@@ -1,0 +1,23 @@
+[package]
+name = "token-hook"
+version = "0.1.0"
+description = "Transfer hook program for Token-2022 AMM"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "token_hook"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = "0.31.1"
+anchor-spl = "0.31.1"
+spl-token-2022 = "4.0.0"
+spl-transfer-hook-interface = "0.7.0"
+spl-tlv-account-resolution = "0.7.0"

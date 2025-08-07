@@ -1,0 +1,28 @@
+[toolchain]
+package_manager = "yarn"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+token_2022_amm = "BUSnE2ekGTqthHsRd2X1HdkWKa4o4AkzjwhD2yDToUXs"
+token_hook = "GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U"
+
+[programs.devnet]
+token_2022_amm = "BUSnE2ekGTqthHsRd2X1HdkWKa4o4AkzjwhD2yDToUXs"
+token_hook = "GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U"
+
+[programs.mainnet]
+token_2022_amm = "BUSnE2ekGTqthHsRd2X1HdkWKa4o4AkzjwhD2yDToUXs"
+token_hook = "GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
