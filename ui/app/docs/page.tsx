@@ -109,7 +109,7 @@ export default function Docs() {
                     >
                       <h3 className="text-xl font-semibold mb-4 text-blue-400">🎯 Problem Statement</h3>
                       <p className="text-gray-300 mb-4">
-                        Token-2022 introduces powerful features like transfer hooks, but major AMMs don't support them:
+                        Token-2022 introduces powerful features like transfer hooks, but major AMMs don&apos;t support them:
                       </p>
                       <ul className="space-y-2 text-gray-300 text-sm">
                         <li>• No support for programmable transfers</li>
@@ -295,7 +295,7 @@ export default function Docs() {
                         <div className="bg-black/30 p-4 rounded-lg">
                           <h4 className="font-semibold text-white mb-2">execute</h4>
                           <p className="text-gray-300 text-sm mb-2">Execute transfer hook logic during token transfer</p>
-                          <code className="text-orange-400 text-xs">// Called automatically during token transfers</code>
+                          <code className="text-orange-400 text-xs">{`// Called automatically during token transfers`}</code>
                         </div>
                       </div>
                     </motion.div>

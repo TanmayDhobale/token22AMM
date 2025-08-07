@@ -3,25 +3,26 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
-import { Connection, PublicKey, Transaction, SystemProgram, clusterApiUrl, sendAndConfirmTransaction, Keypair } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction, SystemProgram, clusterApiUrl, Keypair } from '@solana/web3.js';
 import { createAssociatedTokenAccountInstruction, createInitializeMintInstruction, createMintToInstruction, getAssociatedTokenAddress, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, createTransferCheckedInstruction, ASSOCIATED_TOKEN_PROGRAM_ID, ExtensionType, getMintLen, createInitializeTransferHookInstruction } from '@solana/spl-token';
 import * as anchor from '@coral-xyz/anchor';
 
 // TypeScript declarations for Solana wallet
-declare global {
-  interface Window {
-    solana?: {
+interface PhantomWallet {
       isPhantom?: boolean;
       isConnected?: boolean;
       connect?: () => Promise<{ publicKey: { toString: () => string } }>;
       disconnect?: () => Promise<void>;
-      signTransaction?: (tx: any) => Promise<any>;
-      signAllTransactions?: (txs: any[]) => Promise<any[]>;
+  signTransaction?: (tx: Transaction) => Promise<Transaction>;
+  signAllTransactions?: (txs: Transaction[]) => Promise<Transaction[]>;
       publicKey?: { toString: () => string };
-      // Updated method signatures for newer Phantom versions
-      sendTransaction?: (tx: any, connection: any, options?: any) => Promise<string>;
-      signAndSendTransaction?: (tx: any) => Promise<{ signature: string }>;
-    };
+  sendTransaction?: (tx: Transaction, connection: Connection, options?: { skipPreflight?: boolean }) => Promise<string>;
+  signAndSendTransaction?: (tx: Transaction) => Promise<{ signature: string }>;
+}
+
+declare global {
+  interface Window {
+    solana?: PhantomWallet;
   }
 }
 
@@ -56,7 +57,6 @@ export default function Home() {
   const [poolSuccess, setPoolSuccess] = useState('');
   
   // AMM initialization state
-  const [initializingAmm, setInitializingAmm] = useState(false);
   const [ammError, setAmmError] = useState('');
   const [ammSuccess, setAmmSuccess] = useState('');
 
@@ -155,14 +155,7 @@ export default function Home() {
     }
   };
 
-  const disconnectWallet = () => {
-    setWalletConnected(false);
-    setWalletAddress('');
-    setWalletTokens([]);
-    if ('solana' in window && window.solana?.disconnect) {
-      window.solana.disconnect();
-    }
-  };
+  // Wallet disconnect function removed - handled inline in the UI
 
   async function checkPoolExists(tokenA: string, tokenB: string) {
     if (!tokenA || !tokenB || !walletConnected) {
@@ -223,7 +216,7 @@ export default function Home() {
         if (balance > 0) {
           try {
             // Try to get mint info to check for metadata
-            const mintInfo = await connection.getParsedAccountInfo(new PublicKey(mintAddress));
+            await connection.getParsedAccountInfo(new PublicKey(mintAddress));
             
             tokens.push({
               mint: mintAddress,
@@ -231,7 +224,7 @@ export default function Home() {
               balance,
               decimals
             });
-          } catch (err) {
+          } catch {
             console.warn('Could not fetch mint info for:', mintAddress);
           }
         }
@@ -319,9 +312,9 @@ export default function Home() {
       // Process Token-2022 accounts
       for (const tokenAccount of token2022Accounts.value) {
         const accountData = tokenAccount.account.data.parsed;
-        const mintAddress = accountData.info.mint;
-        const balance = accountData.info.tokenAmount.uiAmount || 0;
-        const decimals = accountData.info.tokenAmount.decimals;
+        const mintAddress: string = accountData.info.mint;
+        const balance: number = accountData.info.tokenAmount.uiAmount || 0;
+        const decimals: number = accountData.info.tokenAmount.decimals;
         
         console.log(`🪙 Token-2022: ${mintAddress} - Balance: ${balance}`);
         
@@ -339,9 +332,9 @@ export default function Home() {
       // Process SPL Token accounts
       for (const tokenAccount of splTokenAccounts.value) {
         const accountData = tokenAccount.account.data.parsed;
-        const mintAddress = accountData.info.mint;
-        const balance = accountData.info.tokenAmount.uiAmount || 0;
-        const decimals = accountData.info.tokenAmount.decimals;
+        const mintAddress: string = accountData.info.mint;
+        const balance: number = accountData.info.tokenAmount.uiAmount || 0;
+        const decimals: number = accountData.info.tokenAmount.decimals;
         
         console.log(`🪙 SPL Token: ${mintAddress} - Balance: ${balance}`);
         
@@ -359,7 +352,7 @@ export default function Home() {
       console.log('📈 Total tokens found:', allTokens.length);
 
       // Fetch liquidity pool positions
-      const pools = await fetchUserPools(userPublicKey, connection);
+      const pools = await fetchUserPools();
       console.log('🏊 Pools found:', pools.length);
 
       // Fetch recent transactions
@@ -389,10 +382,8 @@ export default function Home() {
     }
   }
 
-  async function fetchUserPools(userPublicKey: PublicKey, connection: Connection) {
+  async function fetchUserPools(): Promise<Array<{ tokenA: string; tokenB: string; liquidity: number; fees24h: number }>> {
     try {
-      const ammProgramId = new PublicKey(AMM_PROGRAM_ID);
-      
       // Get all AMM accounts for this user (simplified - in production you'd use getProgramAccounts)
       const pools = [];
       
@@ -455,7 +446,7 @@ export default function Home() {
               }
             });
           }
-        } catch (txErr) {
+        } catch {
           console.warn('Could not parse transaction:', sigInfo.signature);
         }
       }
@@ -480,7 +471,6 @@ export default function Home() {
     try {
       // Connect to devnet
       const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
-      // @ts-ignore
       const provider = window.solana;
       
       // Check if Phantom is available
@@ -583,7 +573,8 @@ export default function Home() {
       let sig: string;
       try {
       if (provider.sendTransaction) {
-        sig = await provider.sendTransaction(tx, connection, { signers: [mintKeypair] });
+        tx.partialSign(mintKeypair);
+        sig = await provider.sendTransaction(tx, connection);
       } else if (provider.signTransaction) {
         tx.partialSign(mintKeypair);
         const signedTx = await provider.signTransaction(tx);
@@ -606,9 +597,9 @@ export default function Home() {
           throw sendError;
       }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Create token error:', err);
-      setCreateError(err.message || 'Failed to create token');
+      setCreateError(err instanceof Error ? err.message : 'Failed to create token');
     } finally {
       setCreating(false);
     }
@@ -627,7 +618,6 @@ export default function Home() {
 
     try {
       const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
-      // @ts-ignore
       const provider = window.solana;
 
       if (!provider || !provider.isPhantom) {
@@ -717,9 +707,9 @@ export default function Home() {
         throw new Error('Phantom signTransaction method not available');
       }
       
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Transfer hook initialization error:', err);
-      setHookInitError(err.message || 'Failed to initialize transfer hook account');
+      setHookInitError(err instanceof Error ? err.message : 'Failed to initialize transfer hook account');
     } finally {
       setInitializingHook(false);
     }
@@ -740,7 +730,6 @@ export default function Home() {
 
     try {
       const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
-      // @ts-ignore
       const provider = window.solana;
       
       if (!provider || !provider.isPhantom) {
@@ -849,16 +838,16 @@ export default function Home() {
         throw new Error('Phantom signTransaction method not available');
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Transfer with hook error:', err);
-      setTransferError(err.message || 'Failed to transfer tokens with hook');
+      setTransferError(err instanceof Error ? err.message : 'Failed to transfer tokens with hook');
     } finally {
       setTransferring(false);
     }
   }
 
   async function handleInitializeAmm(tokenAMint: string, tokenBMint: string) {
-    setInitializingAmm(true);
+    // Starting transfer hook initialization
     setAmmError('');
     setAmmSuccess('');
 
@@ -950,11 +939,11 @@ export default function Home() {
         throw new Error('Phantom signTransaction method not available');
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('AMM initialization error:', err);
-      setAmmError(err.message || 'Failed to initialize AMM');
+      setAmmError(err instanceof Error ? err.message : 'Failed to initialize AMM');
     } finally {
-      setInitializingAmm(false);
+      // AMM initialization complete
     }
   }
 
@@ -963,12 +952,12 @@ export default function Home() {
     setCreatingPool(true);
     setPoolError('');
     setPoolSuccess('');
-
+    
     try {
       if (!walletConnected) {
         throw new Error('Please connect your wallet first');
       }
-
+      
       const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
       const provider = (window as any).solana;
       const userPublicKey = new PublicKey(provider.publicKey.toString());
@@ -1140,9 +1129,9 @@ export default function Home() {
         throw new Error('Phantom signTransaction method not available');
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Pool creation error:', err);
-      setPoolError(err.message || 'Failed to create pool');
+      setPoolError(err instanceof Error ? err.message : 'Failed to create pool');
     } finally {
       setCreatingPool(false);
     }
@@ -1313,7 +1302,7 @@ export default function Home() {
         poolPDA: poolPDA.toString(),
         ammPDA: ammPDA.toString()
       });
-
+      
       // Sign and send transaction
       if (provider.signTransaction) {
         const signedTx = await provider.signTransaction(transaction);
@@ -1339,14 +1328,15 @@ export default function Home() {
         throw new Error('Phantom signTransaction method not available');
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Swap error:', err);
-      let errorMessage = err.message || 'Failed to execute swap';
+      let errorMessage = err instanceof Error ? err.message : 'Failed to execute swap';
       
       // Handle specific program errors
-      if (err.message && err.message.includes('Program failed to complete')) {
+      const errMessage = err instanceof Error ? err.message : '';
+      if (errMessage.includes('Program failed to complete')) {
         errorMessage = 'Swap failed due to insufficient liquidity or invalid pool state. Please ensure the pool has adequate liquidity for both tokens.';
-      } else if (err.message && err.message.includes('SBF program panicked')) {
+      } else if (errMessage.includes('SBF program panicked')) {
         errorMessage = 'Pool calculation error. This usually means the pool has zero reserves or invalid state. Please check if the pool was created with proper liquidity.';
       }
       
@@ -1653,8 +1643,8 @@ export default function Home() {
                   <div className="flex items-center space-x-2">
                     <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse shadow-lg shadow-green-400/50" />
                     <span className="text-sm text-white font-semibold">
-                      {shortenAddress(walletAddress)}
-                    </span>
+                    {shortenAddress(walletAddress)}
+                  </span>
                   </div>
                   <motion.button
                     onClick={() => {
@@ -1885,7 +1875,7 @@ export default function Home() {
                       <h3 className="text-2xl font-bold text-blue-400">Problem We Solve</h3>
                     </div>
                     <p className="text-gray-300 mb-6 text-lg leading-relaxed">
-                      Major AMMs don't support Token-2022 with Transfer Hooks, creating a gap for compliant and programmable tokens.
+                      Major AMMs don&apos;t support Token-2022 with Transfer Hooks, creating a gap for compliant and programmable tokens.
                     </p>
                     <div className="space-y-3">
                       {[
