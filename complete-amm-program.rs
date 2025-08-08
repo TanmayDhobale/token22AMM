@@ -2,10 +2,13 @@
 // This program supports transfer hooks and Token-2022 extensions
 
 use anchor_lang::prelude::*;
-use anchor_spl::token_2022::{Token2022};
-use anchor_spl::token_interface::{TokenAccount, Mint, TokenInterface};
+use anchor_spl::token_2022::Token2022;
+use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface};
+use anchor_lang::solana_program::{program::{invoke, invoke_signed}, account_info::AccountInfo};
+use spl_token_2022::state::Mint as SplMint;
+use spl_token_2022::extension::{BaseStateWithExtensions, StateWithExtensions, transfer_hook::TransferHook as TransferHookExt};
 
-declare_id!("11111111111111111111111111111111"); // Will be replaced by Solana Playground
+declare_id!("7FCFLQ6L9bvrd1YprvgQvRoCRZ2J5oMoUSL35SX55aZC");
 
 #[program]
 pub mod token_2022_amm {
@@ -72,12 +75,25 @@ pub mod token_2022_amm {
     }
 
     /// Swap tokens
-    pub fn swap(
-        ctx: Context<Swap>,
+    pub fn swap<'info>(
+        ctx: Context<'_, '_, '_, 'info, Swap<'info>>,
         amount_in: u64,
         minimum_amount_out: u64,
     ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
+        // 1) Enforce whitelist for any transfer-hook mints
+        if let Some(hook_pid) = extract_transfer_hook_program_id(&ctx.accounts.token_in_mint)? {
+            require!(
+                ctx.accounts.whitelist.allowed.iter().any(|p| p == &hook_pid),
+                AmmError::HookNotWhitelisted
+            );
+        }
+        if let Some(hook_pid) = extract_transfer_hook_program_id(&ctx.accounts.token_out_mint)? {
+            require!(
+                ctx.accounts.whitelist.allowed.iter().any(|p| p == &hook_pid),
+                AmmError::HookNotWhitelisted
+            );
+        }
         
         // Calculate swap amounts (constant product formula)
         let amount_out = calculate_swap_output(
@@ -93,17 +109,43 @@ pub mod token_2022_amm {
             AmmError::InsufficientOutputAmount
         );
 
-        // Transfer tokens from user to vault using Token-2022
-        let transfer_in_ctx = CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
-            anchor_spl::token_interface::TransferChecked {
-                from: ctx.accounts.user_token_in.to_account_info(),
-                mint: ctx.accounts.token_in_mint.to_account_info(),
-                to: ctx.accounts.token_in_vault.to_account_info(),
-                authority: ctx.accounts.user.to_account_info(),
-            },
-        );
-        anchor_spl::token_interface::transfer_checked(transfer_in_ctx, amount_in, ctx.accounts.token_in_mint.decimals)?;
+        // 2) Transfer user -> vault; prefer hook path if remaining accounts provided
+        if !ctx.remaining_accounts.is_empty() {
+            // Manual CPI with remaining accounts to trigger hook
+            let ix_in = spl_token_2022::instruction::transfer_checked(
+                &ctx.accounts.token_program.key(),
+                &ctx.accounts.user_token_in.key(),
+                &ctx.accounts.token_in_mint.key(),
+                &ctx.accounts.token_in_vault.key(),
+                &ctx.accounts.user.key(),
+                &[],
+                amount_in,
+                ctx.accounts.token_in_mint.decimals,
+            ).map_err(|_| error!(AmmError::InvalidSwapCalculation))?;
+
+            let mut infos_in: Vec<AccountInfo<'_>> = Vec::with_capacity(4 + ctx.remaining_accounts.len());
+            let a0 = ctx.accounts.user_token_in.to_account_info();
+            let a1 = ctx.accounts.token_in_mint.to_account_info();
+            let a2 = ctx.accounts.token_in_vault.to_account_info();
+            let a3 = ctx.accounts.user.to_account_info();
+            infos_in.push(a0);
+            infos_in.push(a1);
+            infos_in.push(a2);
+            infos_in.push(a3);
+            for ai in ctx.remaining_accounts.iter() { infos_in.push(ai.clone()); }
+            invoke(&ix_in, &infos_in).map_err(|_| error!(AmmError::InvalidSwapCalculation))?;
+        } else {
+            let transfer_in_ctx = CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                token_interface::TransferChecked {
+                    from: ctx.accounts.user_token_in.to_account_info(),
+                    mint: ctx.accounts.token_in_mint.to_account_info(),
+                    to: ctx.accounts.token_in_vault.to_account_info(),
+                    authority: ctx.accounts.user.to_account_info(),
+                },
+            );
+            token_interface::transfer_checked(transfer_in_ctx, amount_in, ctx.accounts.token_in_mint.decimals)?;
+        }
 
         // Transfer tokens from vault to user (using AMM authority)
         let amm_seeds = &[
@@ -114,23 +156,84 @@ pub mod token_2022_amm {
         ];
         let signer = &[&amm_seeds[..]];
 
-        let transfer_out_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            anchor_spl::token_interface::TransferChecked {
-                from: ctx.accounts.token_out_vault.to_account_info(),
-                mint: ctx.accounts.token_out_mint.to_account_info(),
-                to: ctx.accounts.user_token_out.to_account_info(),
-                authority: ctx.accounts.amm.to_account_info(),
-            },
-            signer,
-        );
-        anchor_spl::token_interface::transfer_checked(transfer_out_ctx, amount_out, ctx.accounts.token_out_mint.decimals)?;
+        // 3) Transfer vault -> user; prefer hook path when provided
+        if !ctx.remaining_accounts.is_empty() {
+            let ix_out = spl_token_2022::instruction::transfer_checked(
+                &ctx.accounts.token_program.key(),
+                &ctx.accounts.token_out_vault.key(),
+                &ctx.accounts.token_out_mint.key(),
+                &ctx.accounts.user_token_out.key(),
+                &ctx.accounts.amm.key(),
+                &[],
+                amount_out,
+                ctx.accounts.token_out_mint.decimals,
+            ).map_err(|_| error!(AmmError::InvalidSwapCalculation))?;
+
+            let mut infos_out: Vec<AccountInfo<'_>> = Vec::with_capacity(4 + ctx.remaining_accounts.len());
+            let b0 = ctx.accounts.token_out_vault.to_account_info();
+            let b1 = ctx.accounts.token_out_mint.to_account_info();
+            let b2 = ctx.accounts.user_token_out.to_account_info();
+            let b3 = ctx.accounts.amm.to_account_info();
+            infos_out.push(b0);
+            infos_out.push(b1);
+            infos_out.push(b2);
+            infos_out.push(b3);
+            for ai in ctx.remaining_accounts.iter() { infos_out.push(ai.clone()); }
+            invoke_signed(&ix_out, &infos_out, signer)
+                .map_err(|_| error!(AmmError::InvalidSwapCalculation))?;
+        } else {
+            let transfer_out_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token_interface::TransferChecked {
+                    from: ctx.accounts.token_out_vault.to_account_info(),
+                    mint: ctx.accounts.token_out_mint.to_account_info(),
+                    to: ctx.accounts.user_token_out.to_account_info(),
+                    authority: ctx.accounts.amm.to_account_info(),
+                },
+                signer,
+            );
+            token_interface::transfer_checked(transfer_out_ctx, amount_out, ctx.accounts.token_out_mint.decimals)?;
+        }
 
         // Update pool balances
         pool.token_a_amount = pool.token_a_amount.checked_add(amount_in).unwrap();
         pool.token_b_amount = pool.token_b_amount.checked_sub(amount_out).unwrap();
 
         msg!("Swap completed: {} in, {} out", amount_in, amount_out);
+        Ok(())
+    }
+
+    // -------------------------------
+    // Whitelist controls (merged here)
+    // -------------------------------
+    pub fn initialize_whitelist(ctx: Context<InitializeWhitelist>) -> Result<()> {
+        let wl = &mut ctx.accounts.whitelist;
+        wl.amm = ctx.accounts.amm.key();
+        wl.allowed = Vec::new();
+        Ok(())
+    }
+
+    pub fn add_hook_program(ctx: Context<UpdateWhitelist>, program_id: Pubkey) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.amm.authority,
+            ctx.accounts.authority.key(),
+            AmmError::InvalidWhitelist
+        );
+        let wl = &mut ctx.accounts.whitelist;
+        if !wl.allowed.iter().any(|p| p == &program_id) {
+            wl.allowed.push(program_id);
+        }
+        Ok(())
+    }
+
+    pub fn remove_hook_program(ctx: Context<UpdateWhitelist>, program_id: Pubkey) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.amm.authority,
+            ctx.accounts.authority.key(),
+            AmmError::InvalidWhitelist
+        );
+        let wl = &mut ctx.accounts.whitelist;
+        wl.allowed.retain(|p| p != &program_id);
         Ok(())
     }
 }
@@ -275,6 +378,14 @@ pub struct Swap<'info> {
         bump
     )]
     pub token_out_vault: InterfaceAccount<'info, TokenAccount>,
+
+    /// Whitelist PDA for allowed transfer-hook program IDs
+    #[account(
+        seeds = [b"whitelist", amm.key().as_ref()],
+        bump,
+        constraint = whitelist.amm == amm.key() @ AmmError::InvalidWhitelist
+    )]
+    pub whitelist: Account<'info, HookWhitelist>,
     
     pub token_program: Interface<'info, TokenInterface>,
 }
@@ -307,6 +418,10 @@ pub enum AmmError {
     InsufficientOutputAmount,
     #[msg("Invalid swap calculation")]
     InvalidSwapCalculation,
+    #[msg("Transfer-hook program is not whitelisted")]
+    HookNotWhitelisted,
+    #[msg("Invalid whitelist account")]
+    InvalidWhitelist,
 }
 
 fn calculate_swap_output(
@@ -350,5 +465,63 @@ mod tests {
         let amount_out = result.unwrap();
         println!("Swap output: {}", amount_out);
         assert!(amount_out > 0);
+    }
+}
+
+// -------------------------------
+// Whitelist + helpers
+// -------------------------------
+
+#[account]
+pub struct HookWhitelist {
+    pub amm: Pubkey,
+    pub allowed: Vec<Pubkey>,
+}
+
+#[derive(Accounts)]
+pub struct InitializeWhitelist<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub amm: Account<'info, Amm>,
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + 32 + 4 + (32 * 16),
+        seeds = [b"whitelist", amm.key().as_ref()],
+        bump
+    )]
+    pub whitelist: Account<'info, HookWhitelist>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateWhitelist<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub amm: Account<'info, Amm>,
+    #[account(
+        mut,
+        seeds = [b"whitelist", amm.key().as_ref()],
+        bump,
+        constraint = whitelist.amm == amm.key() @ AmmError::InvalidWhitelist
+    )]
+    pub whitelist: Account<'info, HookWhitelist>,
+}
+
+// (whitelist_controls module removed; merged into main program above)
+
+fn extract_transfer_hook_program_id(mint: &InterfaceAccount<Mint>) -> Result<Option<Pubkey>> {
+    let mint_ai = mint.to_account_info();
+    let data = mint_ai.data.borrow();
+    let with_ext = StateWithExtensions::<SplMint>::unpack(&data)
+        .map_err(|_| error!(AmmError::InvalidSwapCalculation))?;
+    if let Ok(ext) = with_ext.get_extension::<TransferHookExt>() {
+        if let Some(program_id) = Option::<Pubkey>::from(ext.program_id) {
+            Ok(Some(program_id))
+        } else {
+            Ok(None)
+        }
+    } else {
+        Ok(None)
     }
 }

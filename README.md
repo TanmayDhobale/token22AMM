@@ -47,12 +47,15 @@ This project solves a critical gap in the Solana ecosystem: **no major AMMs curr
   - `fallback` - Handles interface compatibility
 
 #### 2. AMM Program
-- **Program ID**: `2upnrRae7koqW99o5UE314GDwawiZccjue5qe7oUY43b`
-- **Purpose**: Manages liquidity pools and token swaps
+- **Program ID**: `BkcRnA4QMEiM4mPZK4rhpHofibY87yrwaQuSE2tcwScN`
+- **Purpose**: Manages liquidity pools and token swaps with transfer hook support
 - **Key Functions**:
-  - `initialize_amm` - Creates AMM state
-  - `create_pool` - Establishes new trading pairs
-  - `swap` - Executes token exchanges
+  - `initialize_amm` - Creates AMM state with Token-2022 vaults
+  - `create_pool` - Establishes new trading pairs with liquidity transfers
+  - `swap` - Executes token exchanges with hook enforcement
+  - `initialize_whitelist` - Creates whitelist for allowed hook programs
+  - `add_hook_program` - Adds transfer hook program to whitelist
+  - `remove_hook_program` - Removes transfer hook program from whitelist
 
 ### Frontend Application
 - **Framework**: Next.js 15 with TypeScript
@@ -143,6 +146,34 @@ This project solves a critical gap in the Solana ecosystem: **no major AMMs curr
    - **Amount**: Quantity to swap
 3. Review pricing and slippage
 4. Click **Swap Tokens** and confirm
+
+#### Transfer Hook Integration & Whitelist System
+
+Our AMM enforces transfer hooks during swaps through a comprehensive whitelist and remaining accounts system:
+
+**Architecture:**
+- **Whitelist PDA**: Each AMM maintains a whitelist of approved transfer hook programs
+- **Hook Enforcement**: During swaps, the AMM checks if the mint's hook program is whitelisted
+- **Remaining Accounts**: ExtraAccountMetaList PDAs are passed as remaining accounts for hook execution
+
+**Implementation Flow:**
+1. AMM extracts transfer hook program ID from Token-2022 mint extensions
+2. Validates the hook program is in the AMM's whitelist (`HookNotWhitelisted` error if not)
+3. Constructs manual `spl_token_2022::instruction::transfer_checked` with remaining accounts
+4. Token-2022 program resolves ExtraAccountMetaList and invokes the hook program
+5. Hook program executes custom logic (e.g., rejects odd amounts in our demo)
+
+**One-Click Setup in UI:**
+- **Init Whitelist**: Creates whitelist PDA for current token pair
+- **Add Hook To Whitelist**: Adds transfer hook program to allowed list
+- **Init EAML**: Initializes ExtraAccountMetaList for both mints
+- **Test Scenarios**: Generate on-chain proof transactions (allowed/rejected/not-whitelisted)
+
+**Explorer Proof Transactions:**
+Use the scenario buttons in the Trade tab to generate real devnet transactions:
+- Allowed swap (whitelisted + even amount): *[Generate via UI]*
+- Rejected by hook (whitelisted but odd amount): *[Generate via UI]*
+- Not whitelisted (hook program removed): *[Generate via UI]*
 
 ### 4. Monitor Portfolio
 
@@ -259,9 +290,9 @@ sideproject/
 ## 🚨 Important Notes
 
 ### Deployment Status
-- **Transfer Hook Program**: Deployed to devnet
-- **AMM Program**: Deployed with safe math operations
-- **Frontend**: Production-ready with Vercel deployment
+- **Transfer Hook Program**: `GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U` (deployed to devnet)
+- **AMM Program**: `BkcRnA4QMEiM4mPZK4rhpHofibY87yrwaQuSE2tcwScN` (deployed with vaults, whitelist, hook enforcement)
+- **Frontend**: Production-ready with comprehensive UI and one-click setup tools
 
 ### Known Limitations
 - Currently supports **devnet only**
@@ -278,9 +309,12 @@ sideproject/
 
 ### Phase 1: Core Features ✅
 - [x] Token-2022 creation with transfer hooks
-- [x] AMM pool creation and management
-- [x] Token swapping with hook validation
-- [x] Modern UI with portfolio tracking
+- [x] Transfer hook program with ExtraAccountMetaList initialization
+- [x] AMM with Token-2022 vaults and whitelist system
+- [x] Hook enforcement during swaps with remaining accounts
+- [x] One-click setup tools for whitelist and EAML initialization
+- [x] Scenario generation for on-chain proof transactions
+- [x] Modern UI with real wallet integration and portfolio tracking
 
 ### Phase 2: Enhanced Features 🚧
 - [ ] Advanced pool analytics

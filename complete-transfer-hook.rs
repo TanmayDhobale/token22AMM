@@ -21,7 +21,7 @@ pub mod transfer_hook {
     pub fn initialize_extra_account_meta_list(
         ctx: Context<InitializeExtraAccountMetaList>,
     ) -> Result<()> {
-        // Create an empty list of extra accounts (no additional accounts needed for basic hook)
+        // Prepare optional extra accounts if your hook needs them (empty for MVP)
         let account_metas = vec![];
 
         // Calculate account size
@@ -78,7 +78,12 @@ pub mod transfer_hook {
         // - Update counters or statistics
         // - Enforce compliance rules
         
-        // For this example, allow all transfers
+        // Example rule: reject odd amounts to demonstrate a failing case on-chain
+        if amount % 2 == 1 {
+            msg!("❌ Transfer rejected by hook: odd amount {}", amount);
+            return err!(TransferHookError::TransferNotAllowed);
+        }
+
         msg!("✅ Transfer approved!");
         Ok(())
     }

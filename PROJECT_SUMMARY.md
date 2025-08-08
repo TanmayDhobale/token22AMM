@@ -2,7 +2,7 @@
 
 ## 🎯 What We Built
 
-A complete **Automated Market Maker (AMM)** decentralized exchange specifically designed for **Solana's Token-2022** standard with **Transfer Hook** support - the first of its kind!
+A complete **Automated Market Maker (AMM)** decentralized exchange specifically designed for **Solana's Token-2022** standard with **Transfer Hook** support - the first of its kind! Features comprehensive whitelist enforcement, on-chain proof generation, and one-click setup tools.
 
 ## 🏗️ Architecture Overview
 
@@ -11,8 +11,10 @@ A complete **Automated Market Maker (AMM)** decentralized exchange specifically 
    - Executes custom logic during token transfers
    - Enables compliance and programmable token features
 
-2. **AMM Program** (`2upnrRae7koqW99o5UE314GDwawiZccjue5qe7oUY43b`)
-   - Manages liquidity pools using constant product formula
+2. **AMM Program** (`BkcRnA4QMEiM4mPZK4rhpHofibY87yrwaQuSE2tcwScN`)
+   - Manages liquidity pools with Token-2022 vaults
+   - Transfer hook whitelist system for security
+   - Manual transfer instruction construction with remaining accounts
    - Safe math operations to prevent overflows/panics
 
 ### Frontend (Next.js + TypeScript)
@@ -36,10 +38,14 @@ A complete **Automated Market Maker (AMM)** decentralized exchange specifically 
 - **Real-time Updates**: Live data with loading states
 
 ### ✅ Advanced Features
-- **Transfer Hook Integration**: Custom validation during transfers
+- **Transfer Hook Integration**: Custom validation during transfers with whitelist enforcement
+- **Whitelist System**: On-chain whitelist of approved transfer hook programs
+- **Remaining Accounts**: ExtraAccountMetaList PDAs for hook execution
+- **One-Click Setup**: Initialize whitelist, add hooks, and setup EAML in UI
+- **Scenario Generation**: Create on-chain proof transactions (allowed/rejected/not-whitelisted)
 - **Safe Math Operations**: Overflow protection in smart contracts
-- **Error Handling**: Comprehensive error management
-- **Cross-Program Invocation**: Seamless program interactions
+- **Error Handling**: Comprehensive error management with custom error codes
+- **Cross-Program Invocation**: Manual transfer instructions with hook support
 
 ## 🛠️ Technical Stack
 
@@ -97,22 +103,30 @@ A complete **Automated Market Maker (AMM)** decentralized exchange specifically 
 ## 🔧 Development Journey
 
 ### Challenges Solved
-1. **Browser Compatibility**: Manual BigInt handling for cross-browser support
-2. **Program Panics**: Implemented safe math operations
-3. **Transfer Hook Integration**: Proper account setup and validation
-4. **UI Performance**: Optimized animations and state management
+1. **Transfer Hook Enforcement**: Implemented whitelist system and remaining accounts for hook execution
+2. **Program Lifetime Issues**: Resolved complex Rust lifetime conflicts in swap function
+3. **Browser Compatibility**: Manual BigInt handling and instruction building
+4. **Program Panics**: Implemented safe math operations with overflow protection
+5. **Account Order Matching**: Aligned frontend instruction building with Anchor program expectations
+6. **Multiple Program Modules**: Merged whitelist controls into single program entry point
 
 ### Key Learnings
-- Token-2022 requires special handling for transfer hooks
+- Token-2022 transfer hooks require whitelist enforcement and remaining accounts for proper execution
+- Manual transfer instruction construction is needed when hooks are present
+- ExtraAccountMetaList PDAs must be initialized for each mint before hook execution
 - AMM math needs overflow protection for production use
+- Rust lifetime management is critical when mixing account references
 - Modern UI requires careful attention to animations and responsiveness
-- Solana program development benefits from thorough testing
+- Solana program development benefits from thorough testing and proper error handling
 
 ## 📈 Impact & Innovation
 
 ### Market Gap Filled
-- **First AMM** to support Token-2022 with Transfer Hooks
-- **Enables compliant trading** of regulated tokens
+- **First AMM** to support Token-2022 with actual Transfer Hook enforcement
+- **Comprehensive whitelist system** for secure hook program management
+- **One-click setup tools** for easy whitelist and EAML initialization
+- **On-chain proof generation** demonstrating hook enforcement in action
+- **Enables compliant trading** of regulated tokens and RWAs
 - **Professional grade** UI/UX for DeFi applications
 
 ### Technical Achievements

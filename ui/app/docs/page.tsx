@@ -14,6 +14,7 @@ export default function Docs() {
     { id: 'examples', name: 'Examples', icon: '💡' },
     { id: 'deployment', name: 'Deployment', icon: '🚀' },
     { id: 'security', name: 'Security', icon: '🔒' },
+    { id: 'whitelist-proof', name: 'Whitelist Proof', icon: '✅' },
   ];
 
   return (
@@ -164,6 +165,91 @@ export default function Docs() {
                       ))}
                     </div>
                   </motion.div>
+                </motion.div>
+              )}
+
+              {activeSection === 'whitelist-proof' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5 }}
+                  className="space-y-6"
+                >
+                  <h2 className="text-2xl font-bold text-white">Transfer Hook Integration & Whitelist System</h2>
+                  
+                  <div className="space-y-6">
+                    <div className="bg-gradient-to-br from-blue-500/10 to-purple-500/10 p-6 rounded-xl border border-blue-500/20">
+                      <h3 className="text-lg font-semibold mb-4 text-blue-400">🏗️ Architecture Overview</h3>
+                      <ul className="space-y-2 text-gray-300 text-sm">
+                        <li>• <strong>Whitelist PDA:</strong> Each AMM maintains approved transfer hook programs</li>
+                        <li>• <strong>Hook Enforcement:</strong> Validates hook program IDs during swaps</li>
+                        <li>• <strong>Remaining Accounts:</strong> ExtraAccountMetaList PDAs enable hook execution</li>
+                        <li>• <strong>Program IDs:</strong> AMM <code className="bg-black/20 px-1 rounded">BkcRnA4QMEiM4mPZK4rhpHofibY87yrwaQuSE2tcwScN</code></li>
+                        <li>• <strong>Hook Program:</strong> <code className="bg-black/20 px-1 rounded">GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U</code></li>
+                      </ul>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-green-500/10 to-blue-500/10 p-6 rounded-xl border border-green-500/20">
+                      <h3 className="text-lg font-semibold mb-4 text-green-400">⚡ Implementation Flow</h3>
+                      <ol className="space-y-2 text-gray-300 text-sm list-decimal list-inside">
+                        <li>AMM extracts transfer hook program ID from Token-2022 mint extensions</li>
+                        <li>Validates the hook program is in the AMM&apos;s whitelist</li>
+                        <li>Constructs manual <code className="bg-black/20 px-1 rounded">spl_token_2022::instruction::transfer_checked</code></li>
+                        <li>Token-2022 program resolves ExtraAccountMetaList and invokes hook</li>
+                        <li>Hook program executes custom logic (e.g., rejects odd amounts in our demo)</li>
+                      </ol>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-purple-500/10 to-orange-500/10 p-6 rounded-xl border border-purple-500/20">
+                      <h3 className="text-lg font-semibold mb-4 text-purple-400">🎮 One-Click Setup Tools</h3>
+                      <p className="text-gray-300 mb-4">Available in the Trade tab for easy testing:</p>
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div className="space-y-2 text-sm">
+                          <div className="bg-white/5 p-3 rounded-lg">
+                            <strong className="text-blue-400">Init Whitelist:</strong> Creates whitelist PDA
+                          </div>
+                          <div className="bg-white/5 p-3 rounded-lg">
+                            <strong className="text-green-400">Add Hook:</strong> Adds program to whitelist
+                          </div>
+                        </div>
+                        <div className="space-y-2 text-sm">
+                          <div className="bg-white/5 p-3 rounded-lg">
+                            <strong className="text-orange-400">Init EAML:</strong> Initializes metadata lists
+                          </div>
+                          <div className="bg-white/5 p-3 rounded-lg">
+                            <strong className="text-purple-400">Test Scenarios:</strong> Generate proof TXs
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-orange-500/10 to-red-500/10 p-6 rounded-xl border border-orange-500/20">
+                      <h3 className="text-lg font-semibold mb-4 text-orange-400">🔗 On-Chain Proof Transactions</h3>
+                      <p className="text-gray-300 mb-4">
+                        Use the scenario buttons in the Trade tab to generate real devnet transactions that demonstrate hook enforcement:
+                      </p>
+                      <div className="space-y-3 text-sm">
+                        <div className="flex items-center space-x-3">
+                          <span className="w-3 h-3 bg-green-500 rounded-full"></span>
+                          <span className="text-gray-300"><strong>Allowed Swap:</strong> Whitelisted program + even amount → Hook approves</span>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          <span className="w-3 h-3 bg-yellow-500 rounded-full"></span>
+                          <span className="text-gray-300"><strong>Rejected by Hook:</strong> Whitelisted program + odd amount → Hook rejects</span>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          <span className="w-3 h-3 bg-red-500 rounded-full"></span>
+                          <span className="text-gray-300"><strong>Not Whitelisted:</strong> Hook program removed from whitelist → AMM rejects</span>
+                        </div>
+                      </div>
+                      <div className="mt-4 p-3 bg-black/20 rounded-lg">
+                        <p className="text-xs text-gray-400">
+                          💡 <strong>Explorer Tips:</strong> In allowed cases, look for inner instructions to the hook program. 
+                          In rejected cases, check transaction logs for <code>TransferNotAllowed</code> or <code>HookNotWhitelisted</code> errors.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </motion.div>
               )}
 

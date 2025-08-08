@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
-import { Connection, PublicKey, Transaction, SystemProgram, clusterApiUrl, Keypair } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction, SystemProgram, clusterApiUrl, Keypair, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
 import { createAssociatedTokenAccountInstruction, createInitializeMintInstruction, createMintToInstruction, getAssociatedTokenAddress, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, createTransferCheckedInstruction, ASSOCIATED_TOKEN_PROGRAM_ID, ExtensionType, getMintLen, createInitializeTransferHookInstruction } from '@solana/spl-token';
 import * as anchor from '@coral-xyz/anchor';
 
@@ -69,6 +69,12 @@ export default function Home() {
   const [swapping, setSwapping] = useState(false);
   const [swapError, setSwapError] = useState('');
   const [swapSuccess, setSwapSuccess] = useState('');
+  const [hookSetupMsg, setHookSetupMsg] = useState('');
+  const [scenarioBusy, setScenarioBusy] = useState(false);
+  const [scenarioError, setScenarioError] = useState('');
+  const [scenarioAllowedSig, setScenarioAllowedSig] = useState('');
+  const [scenarioRejectedSig, setScenarioRejectedSig] = useState('');
+  const [scenarioNotWhitelistedSig, setScenarioNotWhitelistedSig] = useState('');
 
   // Wallet tokens state
   const [walletTokens, setWalletTokens] = useState<Array<{
@@ -119,7 +125,7 @@ export default function Home() {
   // Replace with your deployed AMM program ID on devnet
   // OLD: 'DCjgs2YXvEiZsiXVSMskg8ReMSsYbuLDpfMkXvP5iwsC' (has unsafe math - caused panics)
   // FIXED: Improved AMM with safe math operations and correct declare_id!
-  const AMM_PROGRAM_ID = '2upnrRae7koqW99o5UE314GDwawiZccjue5qe7oUY43b';
+  const AMM_PROGRAM_ID = 'BkcRnA4QMEiM4mPZK4rhpHofibY87yrwaQuSE2tcwScN';
 
   const tabs = [
     { id: 'overview', name: 'Overview', icon: '🏠' },
@@ -132,7 +138,7 @@ export default function Home() {
   const navLinks = [
     { name: 'Features', href: '#features' },
     { name: 'Documentation', href: '/docs' },
-    { name: 'GitHub', href: 'https://github.com' },
+    { name: 'GitHub', href: 'https://github.com/TanmayDhobale/token22AMM' },
   ];
 
   const connectWallet = async () => {
@@ -864,9 +870,21 @@ export default function Home() {
       const tokenBMintPubkey = new PublicKey(tokenBMint);
       const ammProgramId = new PublicKey(AMM_PROGRAM_ID);
 
-      // Derive AMM PDA (simplified version doesn't need vault PDAs)
+      // Derive AMM PDA and dependent PDAs
       const [ammPDA] = PublicKey.findProgramAddressSync(
         [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
+        ammProgramId
+      );
+      const [tokenAVaultPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('token_a_vault'), ammPDA.toBuffer()],
+        ammProgramId
+      );
+      const [tokenBVaultPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('token_b_vault'), ammPDA.toBuffer()],
+        ammProgramId
+      );
+      const [lpMintPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('lp_mint'), ammPDA.toBuffer()],
         ammProgramId
       );
 
@@ -898,11 +916,17 @@ export default function Home() {
 
       const initializeAmmInstruction = new anchor.web3.TransactionInstruction({
         keys: [
+          // Must match InitializeAmm<'info> order
           { pubkey: ammPDA, isSigner: false, isWritable: true },
-          { pubkey: userPublicKey, isSigner: true, isWritable: true },
           { pubkey: tokenAMintPubkey, isSigner: false, isWritable: false },
           { pubkey: tokenBMintPubkey, isSigner: false, isWritable: false },
+          { pubkey: tokenAVaultPDA, isSigner: false, isWritable: true },
+          { pubkey: tokenBVaultPDA, isSigner: false, isWritable: true },
+          { pubkey: lpMintPDA, isSigner: false, isWritable: true },
+          { pubkey: userPublicKey, isSigner: true, isWritable: true },
           { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+          { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
+          { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
         ],
         programId: ammProgramId,
         data: Buffer.from(instructionData),
@@ -1012,6 +1036,14 @@ export default function Home() {
         [Buffer.from('pool'), ammPDA.toBuffer()],
         ammProgramId
       );
+      const [tokenAVaultPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('token_a_vault'), ammPDA.toBuffer()],
+        ammProgramId
+      );
+      const [tokenBVaultPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('token_b_vault'), ammPDA.toBuffer()],
+        ammProgramId
+      );
 
       // Check if pool already exists
       try {
@@ -1039,6 +1071,19 @@ export default function Home() {
       const decimals = 9;
       const tokenAAmountBigInt = BigInt(parseFloat(effectiveTokenAAmount) * Math.pow(10, decimals));
       const tokenBAmountBigInt = BigInt(parseFloat(effectiveTokenBAmount) * Math.pow(10, decimals));
+
+      // Ensure user has ATAs for both mints (Token-2022)
+      const userTokenA = await getAssociatedTokenAddress(tokenAMintPubkey, userPublicKey, false, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+      const userTokenB = await getAssociatedTokenAddress(tokenBMintPubkey, userPublicKey, false, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+      const preIxs: anchor.web3.TransactionInstruction[] = [];
+      const userTokenAInfo = await connection.getAccountInfo(userTokenA);
+      if (!userTokenAInfo) {
+        preIxs.push(createAssociatedTokenAccountInstruction(userPublicKey, userTokenA, userPublicKey, tokenAMintPubkey, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID));
+      }
+      const userTokenBInfo = await connection.getAccountInfo(userTokenB);
+      if (!userTokenBInfo) {
+        preIxs.push(createAssociatedTokenAccountInstruction(userPublicKey, userTokenB, userPublicKey, tokenBMintPubkey, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID));
+      }
 
       // Create pool instruction data (browser-compatible)
       // Calculate the correct discriminator for create_pool
@@ -1074,18 +1119,26 @@ export default function Home() {
 
       const createPoolInstruction = new anchor.web3.TransactionInstruction({
         keys: [
+          // Must match CreatePool<'info> order
           { pubkey: poolPDA, isSigner: false, isWritable: true },
           { pubkey: ammPDA, isSigner: false, isWritable: false },
           { pubkey: userPublicKey, isSigner: true, isWritable: true },
+          { pubkey: userTokenA, isSigner: false, isWritable: true },
+          { pubkey: userTokenB, isSigner: false, isWritable: true },
           { pubkey: tokenAMintPubkey, isSigner: false, isWritable: false },
           { pubkey: tokenBMintPubkey, isSigner: false, isWritable: false },
+          { pubkey: tokenAVaultPDA, isSigner: false, isWritable: true },
+          { pubkey: tokenBVaultPDA, isSigner: false, isWritable: true },
+          { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
           { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         ],
         programId: ammProgramId,
         data: Buffer.from(instructionData),
       });
 
-      const transaction = new Transaction().add(createPoolInstruction);
+      const transaction = new Transaction();
+      preIxs.forEach(ix => transaction.add(ix));
+      transaction.add(createPoolInstruction);
       transaction.feePayer = userPublicKey;
       transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
 
@@ -1208,6 +1261,22 @@ export default function Home() {
         ammProgramId
       );
 
+      // Derive whitelist PDA for this AMM
+      const [whitelistPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('whitelist'), ammPDA.toBuffer()],
+        ammProgramId
+      );
+
+      // Derive ExtraAccountMetaList PDAs for both mints (created by the hook program)
+      const [extraMetaListInPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('extra-account-metas'), tokenAMintPubkey.toBuffer()],
+        new PublicKey(TRANSFER_HOOK_PROGRAM_ID)
+      );
+      const [extraMetaListOutPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('extra-account-metas'), tokenBMintPubkey.toBuffer()],
+        new PublicKey(TRANSFER_HOOK_PROGRAM_ID)
+      );
+
       // Check if pool exists and has liquidity
       try {
         const poolAccount = await connection.getAccountInfo(poolPDA);
@@ -1282,6 +1351,11 @@ export default function Home() {
           { pubkey: userPublicKey, isSigner: true, isWritable: true },
           { pubkey: tokenAMintPubkey, isSigner: false, isWritable: false },
           { pubkey: tokenBMintPubkey, isSigner: false, isWritable: false },
+          // whitelist account (read-only)
+          { pubkey: whitelistPDA, isSigner: false, isWritable: false },
+          // remaining accounts for transfer hook (EAML PDAs)
+          { pubkey: extraMetaListInPDA, isSigner: false, isWritable: false },
+          { pubkey: extraMetaListOutPDA, isSigner: false, isWritable: false },
         ],
         programId: ammProgramId,
         data: Buffer.from(instructionData),
@@ -1343,6 +1417,300 @@ export default function Home() {
       setSwapError(errorMessage);
     } finally {
       setSwapping(false);
+    }
+  }
+
+  // -------------------------------
+  // Hook/Whitelist setup helpers
+  // -------------------------------
+  async function initializeWhitelistForSelectedPair() {
+    setHookSetupMsg('');
+    try {
+      if (!walletConnected) throw new Error('Connect wallet first');
+      if (!fromToken || !toToken) throw new Error('Select tokens first');
+
+      const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
+      const provider = (window as any).solana;
+      const userPublicKey = new PublicKey(provider.publicKey.toString());
+      const ammProgramId = new PublicKey(AMM_PROGRAM_ID);
+
+      const tokenAMintPubkey = new PublicKey(fromToken);
+      const tokenBMintPubkey = new PublicKey(toToken);
+      const [ammPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
+        ammProgramId
+      );
+      const [whitelistPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('whitelist'), ammPDA.toBuffer()],
+        ammProgramId
+      );
+
+      // discriminator for initialize_whitelist
+      const name = 'initialize_whitelist';
+      const preimage = `global:${name}`;
+      const discr = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(preimage))).slice(0,8);
+
+      const ix = new anchor.web3.TransactionInstruction({
+        programId: ammProgramId,
+        keys: [
+          { pubkey: userPublicKey, isSigner: true, isWritable: true },
+          { pubkey: ammPDA, isSigner: false, isWritable: false },
+          { pubkey: whitelistPDA, isSigner: false, isWritable: true },
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        ],
+        data: Buffer.from(discr),
+      });
+
+      const tx = new Transaction().add(ix);
+      tx.feePayer = userPublicKey;
+      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      const signed = await provider.signTransaction(tx);
+      const sig = await connection.sendRawTransaction(signed.serialize());
+      await connection.confirmTransaction(sig, 'confirmed');
+      setHookSetupMsg(`Whitelist initialized. Sig: ${sig}`);
+    } catch (e: any) {
+      setHookSetupMsg(e?.message || 'Failed to initialize whitelist');
+    }
+  }
+
+  async function addHookProgramToWhitelist() {
+    setHookSetupMsg('');
+    try {
+      if (!walletConnected) throw new Error('Connect wallet first');
+      if (!fromToken || !toToken) throw new Error('Select tokens first');
+
+      const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
+      const provider = (window as any).solana;
+      const userPublicKey = new PublicKey(provider.publicKey.toString());
+      const ammProgramId = new PublicKey(AMM_PROGRAM_ID);
+      const hookPid = new PublicKey(TRANSFER_HOOK_PROGRAM_ID);
+
+      const tokenAMintPubkey = new PublicKey(fromToken);
+      const tokenBMintPubkey = new PublicKey(toToken);
+      const [ammPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
+        ammProgramId
+      );
+      const [whitelistPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('whitelist'), ammPDA.toBuffer()],
+        ammProgramId
+      );
+
+      const name = 'add_hook_program';
+      const preimage = `global:${name}`;
+      const discr = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(preimage))).slice(0,8);
+      const data = new Uint8Array(8 + 32);
+      data.set(discr, 0);
+      data.set(hookPid.toBytes(), 8);
+
+      const ix = new anchor.web3.TransactionInstruction({
+        programId: ammProgramId,
+        keys: [
+          { pubkey: userPublicKey, isSigner: true, isWritable: true },
+          { pubkey: ammPDA, isSigner: false, isWritable: false },
+          { pubkey: whitelistPDA, isSigner: false, isWritable: true },
+        ],
+        data: Buffer.from(data),
+      });
+
+      const tx = new Transaction().add(ix);
+      tx.feePayer = userPublicKey;
+      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      const signed = await provider.signTransaction(tx);
+      const sig = await connection.sendRawTransaction(signed.serialize());
+      await connection.confirmTransaction(sig, 'confirmed');
+      setHookSetupMsg(`Hook program whitelisted. Sig: ${sig}`);
+    } catch (e: any) {
+      setHookSetupMsg(e?.message || 'Failed to add hook program');
+    }
+  }
+
+  async function removeHookProgramFromWhitelist() {
+    setHookSetupMsg('');
+    try {
+      if (!walletConnected) throw new Error('Connect wallet first');
+      if (!fromToken || !toToken) throw new Error('Select tokens first');
+
+      const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
+      const provider = (window as any).solana;
+      const userPublicKey = new PublicKey(provider.publicKey.toString());
+      const ammProgramId = new PublicKey(AMM_PROGRAM_ID);
+      const hookPid = new PublicKey(TRANSFER_HOOK_PROGRAM_ID);
+
+      const tokenAMintPubkey = new PublicKey(fromToken);
+      const tokenBMintPubkey = new PublicKey(toToken);
+      const [ammPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
+        ammProgramId
+      );
+      const [whitelistPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('whitelist'), ammPDA.toBuffer()],
+        ammProgramId
+      );
+
+      const name = 'remove_hook_program';
+      const preimage = `global:${name}`;
+      const discr = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(preimage))).slice(0,8);
+      const data = new Uint8Array(8 + 32);
+      data.set(discr, 0);
+      data.set(hookPid.toBytes(), 8);
+
+      const ix = new anchor.web3.TransactionInstruction({
+        programId: ammProgramId,
+        keys: [
+          { pubkey: userPublicKey, isSigner: true, isWritable: true },
+          { pubkey: ammPDA, isSigner: false, isWritable: false },
+          { pubkey: whitelistPDA, isSigner: false, isWritable: true },
+        ],
+        data: Buffer.from(data),
+      });
+
+      const tx = new Transaction().add(ix);
+      tx.feePayer = userPublicKey;
+      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      const signed = await provider.signTransaction(tx);
+      const sig = await connection.sendRawTransaction(signed.serialize());
+      await connection.confirmTransaction(sig, 'confirmed');
+      setHookSetupMsg(`Hook program removed from whitelist. Sig: ${sig}`);
+    } catch (e: any) {
+      setHookSetupMsg(e?.message || 'Failed to remove hook program');
+    }
+  }
+
+  async function ensureWhitelistedForCurrentPair() {
+    await initializeWhitelistForSelectedPair();
+    await addHookProgramToWhitelist();
+  }
+
+  // Minimal swap builder used for scenario generation
+  async function runScenarioSwap(amountInLamports: bigint): Promise<string> {
+    if (!walletConnected) throw new Error('Connect wallet first');
+    if (!fromToken || !toToken) throw new Error('Select tokens first');
+
+    const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
+    const provider = (window as any).solana;
+    const userPublicKey = new PublicKey(provider.publicKey.toString());
+    const ammProgramId = new PublicKey(AMM_PROGRAM_ID);
+
+    const tokenAMintPubkey = new PublicKey(fromToken);
+    const tokenBMintPubkey = new PublicKey(toToken);
+    const [ammPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
+      ammProgramId
+    );
+    const [poolPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('pool'), ammPDA.toBuffer()],
+      ammProgramId
+    );
+    const [whitelistPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('whitelist'), ammPDA.toBuffer()],
+      ammProgramId
+    );
+    const [extraMetaListInPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('extra-account-metas'), tokenAMintPubkey.toBuffer()],
+      new PublicKey(TRANSFER_HOOK_PROGRAM_ID)
+    );
+    const [extraMetaListOutPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('extra-account-metas'), tokenBMintPubkey.toBuffer()],
+      new PublicKey(TRANSFER_HOOK_PROGRAM_ID)
+    );
+
+    // discriminator
+    const preimage = 'global:swap';
+    const discr = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(preimage))).slice(0,8);
+    const minimumAmountOut = BigInt(0);
+    const data = new Uint8Array(8 + 8 + 8);
+    data.set(discr, 0);
+    for (let i = 0; i < 8; i++) {
+      data[8 + i] = Number((amountInLamports >> BigInt(8 * i)) & BigInt(0xff));
+      data[16 + i] = Number((minimumAmountOut >> BigInt(8 * i)) & BigInt(0xff));
+    }
+
+    const ix = new anchor.web3.TransactionInstruction({
+      programId: ammProgramId,
+      keys: [
+        { pubkey: poolPDA, isSigner: false, isWritable: true },
+        { pubkey: ammPDA, isSigner: false, isWritable: false },
+        { pubkey: userPublicKey, isSigner: true, isWritable: true },
+        { pubkey: tokenAMintPubkey, isSigner: false, isWritable: false },
+        { pubkey: tokenBMintPubkey, isSigner: false, isWritable: false },
+        { pubkey: whitelistPDA, isSigner: false, isWritable: false },
+        { pubkey: extraMetaListInPDA, isSigner: false, isWritable: false },
+        { pubkey: extraMetaListOutPDA, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.from(data),
+    });
+
+    const tx = new Transaction().add(ix);
+    tx.feePayer = userPublicKey;
+    tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+    const signed = await provider.signTransaction(tx);
+    const sig = await connection.sendRawTransaction(signed.serialize());
+    try {
+          await connection.confirmTransaction(sig, 'confirmed');
+    } catch (_) {
+      // keep signature even if it fails
+    }
+    return sig;
+  }
+
+  async function runAllowedSwapScenario() {
+    setScenarioError('');
+    setScenarioBusy(true);
+    try {
+      await ensureWhitelistedForCurrentPair();
+      await initializeEamlForSelected();
+      // 1 whole token (1e9 lamports) → even amount so hook allows
+      const sig = await runScenarioSwap(BigInt(1_000_000_000));
+      setScenarioAllowedSig(sig);
+    } catch (e: any) {
+      setScenarioError(e?.message || 'Failed allowed scenario');
+    } finally {
+      setScenarioBusy(false);
+    }
+  }
+
+  async function runRejectedByHookScenario() {
+    setScenarioError('');
+    setScenarioBusy(true);
+    try {
+      await ensureWhitelistedForCurrentPair();
+      await initializeEamlForSelected();
+      // 1 lamport → odd amount to trigger hook rejection
+      const sig = await runScenarioSwap(BigInt(1));
+      setScenarioRejectedSig(sig);
+    } catch (e: any) {
+      setScenarioRejectedSig('');
+      setScenarioError(e?.message || 'Failed rejected-by-hook scenario');
+    } finally {
+      setScenarioBusy(false);
+    }
+  }
+
+  async function runNotWhitelistedScenario() {
+    setScenarioError('');
+    setScenarioBusy(true);
+    try {
+      await initializeWhitelistForSelectedPair();
+      await removeHookProgramFromWhitelist();
+      const sig = await runScenarioSwap(BigInt(1_000_000_000));
+      setScenarioNotWhitelistedSig(sig);
+    } catch (e: any) {
+      setScenarioError(e?.message || 'Failed not-whitelisted scenario');
+    } finally {
+      setScenarioBusy(false);
+    }
+  }
+
+  async function initializeEamlForSelected() {
+    setHookSetupMsg('');
+    try {
+      if (!fromToken || !toToken) throw new Error('Select tokens first');
+      await handleInitializeTransferHook(fromToken);
+      await handleInitializeTransferHook(toToken);
+      setHookSetupMsg('ExtraAccountMetaList initialized for both tokens');
+    } catch (e: any) {
+      setHookSetupMsg(e?.message || 'Failed initializing EAML');
     }
   }
 
@@ -2241,6 +2609,25 @@ export default function Home() {
                           >
                       {initializingHook ? 'Checking...' : 'Initialize Transfer Hook Account'}
                           </motion.button>
+                    <div className="grid md:grid-cols-3 gap-3 mt-4">
+                      <button onClick={initializeWhitelistForSelectedPair} className="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-lg text-sm">Init Whitelist</button>
+                      <button onClick={addHookProgramToWhitelist} className="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-lg text-sm">Add Hook To Whitelist</button>
+                      <button onClick={initializeEamlForSelected} className="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-lg text-sm">Init EAML (both tokens)</button>
+                    </div>
+                    <div className="grid md:grid-cols-3 gap-3 mt-3">
+                      <button disabled={scenarioBusy} onClick={runAllowedSwapScenario} className="bg-green-500/20 hover:bg-green-500/30 px-3 py-2 rounded-lg text-sm disabled:opacity-50">Scenario: Allowed</button>
+                      <button disabled={scenarioBusy} onClick={runRejectedByHookScenario} className="bg-yellow-500/20 hover:bg-yellow-500/30 px-3 py-2 rounded-lg text-sm disabled:opacity-50">Scenario: Rejected by Hook</button>
+                      <button disabled={scenarioBusy} onClick={runNotWhitelistedScenario} className="bg-red-500/20 hover:bg-red-500/30 px-3 py-2 rounded-lg text-sm disabled:opacity-50">Scenario: Not Whitelisted</button>
+                    </div>
+                    {scenarioError && <div className="text-xs text-red-300 mt-2 break-words">{scenarioError}</div>}
+                    {(scenarioAllowedSig || scenarioRejectedSig || scenarioNotWhitelistedSig) && (
+                      <div className="text-xs text-blue-300 mt-2 space-y-1 break-words">
+                        {scenarioAllowedSig && <div>Allowed: <a className="underline" href={`https://solscan.io/tx/${scenarioAllowedSig}?cluster=devnet`} target="_blank" rel="noreferrer">{scenarioAllowedSig}</a></div>}
+                        {scenarioRejectedSig && <div>Rejected by Hook: <a className="underline" href={`https://solscan.io/tx/${scenarioRejectedSig}?cluster=devnet`} target="_blank" rel="noreferrer">{scenarioRejectedSig}</a></div>}
+                        {scenarioNotWhitelistedSig && <div>Not Whitelisted: <a className="underline" href={`https://solscan.io/tx/${scenarioNotWhitelistedSig}?cluster=devnet`} target="_blank" rel="noreferrer">{scenarioNotWhitelistedSig}</a></div>}
+                      </div>
+                    )}
+                    {hookSetupMsg && <div className="text-xs text-blue-300 mt-2 break-words">{hookSetupMsg}</div>}
                     {hookInitError && <div className="text-red-400 font-medium mt-4">{hookInitError}</div>}
                     {hookInitSuccess && <div className="text-green-400 font-medium mt-4">{hookInitSuccess}</div>}
                 </motion.div>

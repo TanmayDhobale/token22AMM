@@ -5,6 +5,8 @@ use anchor_spl::token_2022::{
 };
 use spl_transfer_hook_interface::onchain::invoke_transfer_checked;
 use spl_tlv_account_resolution::account::ExtraAccountMeta;
+use spl_token_2022::state::{Mint as SplMint, StateWithExtensions};
+use spl_token_2022::extension::transfer_hook::TransferHook as TransferHookExt;
 
 declare_id!("BUSnE2ekGTqthHsRd2X1HdkWKa4o4AkzjwhD2yDToUXs");
 
@@ -79,6 +81,21 @@ pub mod token_2022_amm {
         minimum_amount_out: u64,
     ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
+        // Enforce hook whitelist when mints have a transfer hook extension
+        // Input mint
+        if let Some(hook_pid) = extract_transfer_hook_program_id(&ctx.accounts.token_in_mint)? {
+            require!(
+                ctx.accounts.whitelist.allowed.iter().any(|p| p == &hook_pid),
+                AmmError::HookNotWhitelisted
+            );
+        }
+        // Output mint
+        if let Some(hook_pid) = extract_transfer_hook_program_id(&ctx.accounts.token_out_mint)? {
+            require!(
+                ctx.accounts.whitelist.allowed.iter().any(|p| p == &hook_pid),
+                AmmError::HookNotWhitelisted
+            );
+        }
         
         // Calculate swap amounts (constant product formula)
         let amount_out = calculate_swap_output(
@@ -105,15 +122,15 @@ pub mod token_2022_amm {
             },
         );
 
-        // Use transfer hook if the token has one
-        if ctx.accounts.extra_account_meta_list.is_some() {
+        // Prefer transfer hook path when extra accounts are provided via remaining_accounts
+        if !ctx.remaining_accounts.is_empty() {
             invoke_transfer_checked(
-                ctx.accounts.token_program.key,
+                ctx.accounts.token_program.key(),
                 ctx.accounts.user_token_in.to_account_info(),
                 ctx.accounts.token_in_mint.to_account_info(),
                 ctx.accounts.token_in_vault.to_account_info(),
                 ctx.accounts.user.to_account_info(),
-                ctx.accounts.remaining_accounts,
+                &ctx.remaining_accounts,
                 amount_in,
                 ctx.accounts.token_in_mint.decimals,
                 &[],
@@ -133,15 +150,15 @@ pub mod token_2022_amm {
             },
         );
 
-        // Use transfer hook if the token has one
-        if ctx.accounts.extra_account_meta_list_out.is_some() {
+        // Prefer transfer hook path when remaining accounts provided
+        if !ctx.remaining_accounts.is_empty() {
             invoke_transfer_checked(
-                ctx.accounts.token_program.key,
+                ctx.accounts.token_program.key(),
                 ctx.accounts.token_out_vault.to_account_info(),
                 ctx.accounts.token_out_mint.to_account_info(),
                 ctx.accounts.user_token_out.to_account_info(),
                 ctx.accounts.amm.to_account_info(),
-                ctx.accounts.remaining_accounts_out,
+                &ctx.remaining_accounts,
                 amount_out,
                 ctx.accounts.token_out_mint.decimals,
                 &[],
@@ -305,17 +322,15 @@ pub struct Swap<'info> {
     pub token_in_vault: Account<'info, TokenAccount>,
     #[account(mut)]
     pub token_out_vault: Account<'info, TokenAccount>,
-    
-    /// Optional: Extra account metas for transfer hook
-    pub extra_account_meta_list: Option<AccountInfo<'info>>,
-    /// Optional: Extra account metas for output token transfer hook
-    pub extra_account_meta_list_out: Option<AccountInfo<'info>>,
+    /// Whitelist for allowed transfer-hook program IDs
+    #[account(
+        seeds = [b"whitelist", amm.key().as_ref()],
+        bump,
+        constraint = whitelist.amm == amm.key() @ AmmError::InvalidWhitelist
+    )]
+    pub whitelist: Account<'info, HookWhitelist>,
     
     pub token_program: Program<'info, Token2022>,
-    
-    /// Remaining accounts for transfer hooks
-    pub remaining_accounts: UncheckedAccount<'info>,
-    pub remaining_accounts_out: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -378,6 +393,10 @@ pub enum AmmError {
     InvalidSwapCalculation,
     #[msg("Invalid liquidity calculation")]
     InvalidLiquidityCalculation,
+    #[msg("Transfer-hook program is not whitelisted")]
+    HookNotWhitelisted,
+    #[msg("Invalid whitelist account")]
+    InvalidWhitelist,
 }
 
 fn calculate_swap_output(
@@ -423,5 +442,102 @@ fn calculate_lp_tokens(
             .unwrap();
         
         Ok(lp_tokens_a.min(lp_tokens_b))
+    }
+}
+
+// -------------------------------
+// Hook whitelist account & ixes
+// -------------------------------
+
+#[account]
+pub struct HookWhitelist {
+    pub amm: Pubkey,
+    pub allowed: Vec<Pubkey>,
+}
+
+#[derive(Accounts)]
+pub struct InitializeWhitelist<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub amm: Account<'info, Amm>,
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + 32 + 4 + (32 * 16), // allow up to 16 allowed programs initially
+        seeds = [b"whitelist", amm.key().as_ref()],
+        bump
+    )]
+    pub whitelist: Account<'info, HookWhitelist>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct UpdateWhitelist<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub amm: Account<'info, Amm>,
+    #[account(
+        mut,
+        seeds = [b"whitelist", amm.key().as_ref()],
+        bump,
+        constraint = whitelist.amm == amm.key() @ AmmError::InvalidWhitelist
+    )]
+    pub whitelist: Account<'info, HookWhitelist>,
+}
+
+impl<'info> From<&UpdateWhitelist<'info>> for Account<'info, HookWhitelist> {
+    fn from(accs: &UpdateWhitelist<'info>) -> Self {
+        accs.whitelist.clone()
+    }
+}
+
+#[program]
+pub mod whitelist_controls {
+    use super::*;
+
+    pub fn initialize_whitelist(ctx: Context<InitializeWhitelist>) -> Result<()> {
+        let wl = &mut ctx.accounts.whitelist;
+        wl.amm = ctx.accounts.amm.key();
+        wl.allowed = Vec::new();
+        Ok(())
+    }
+
+    pub fn add_hook_program(ctx: Context<UpdateWhitelist>, program_id: Pubkey) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.amm.authority,
+            ctx.accounts.authority.key(),
+            AmmError::InvalidWhitelist
+        );
+        let wl = &mut ctx.accounts.whitelist;
+        if !wl.allowed.iter().any(|p| p == &program_id) {
+            wl.allowed.push(program_id);
+        }
+        Ok(())
+    }
+
+    pub fn remove_hook_program(ctx: Context<UpdateWhitelist>, program_id: Pubkey) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.amm.authority,
+            ctx.accounts.authority.key(),
+            AmmError::InvalidWhitelist
+        );
+        let wl = &mut ctx.accounts.whitelist;
+        wl.allowed.retain(|p| p != &program_id);
+        Ok(())
+    }
+}
+
+// -------------------------------
+// Helpers
+// -------------------------------
+
+fn extract_transfer_hook_program_id(mint: &Account<Mint>) -> Result<Option<Pubkey>> {
+    let data = mint.to_account_info().data.borrow();
+    let with_ext = StateWithExtensions::<SplMint>::unpack(&data)
+        .map_err(|_| error!(AmmError::InvalidSwapCalculation))?;
+    if let Ok(ext) = with_ext.get_extension::<TransferHookExt>() {
+        Ok(Some(ext.program_id))
+    } else {
+        Ok(None)
     }
 }
