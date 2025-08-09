@@ -185,7 +185,8 @@ export default function Docs() {
                         <li>• <strong>Hook Enforcement:</strong> Validates hook program IDs during swaps</li>
                         <li>• <strong>Remaining Accounts:</strong> ExtraAccountMetaList PDAs enable hook execution</li>
                         <li>• <strong>Program IDs:</strong> AMM <code className="bg-black/20 px-1 rounded">BkcRnA4QMEiM4mPZK4rhpHofibY87yrwaQuSE2tcwScN</code></li>
-                        <li>• <strong>Hook Program:</strong> <code className="bg-black/20 px-1 rounded">GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U</code></li>
+                        <li>• <strong>Hook Program:</strong> <code className="bg-black/20 px-1 rounded">o1ZEvtrSXokknjnyaMkp7xyXfMJr4znptdpba7XKoiT</code></li>
+                        <li>• <strong>AMM Program:</strong> <code className="bg-black/20 px-1 rounded">6vL4UPFu43VpdcD8jBs8F4AvtaMtDxkEWMNpZJZtueYM</code></li>
                       </ul>
                     </div>
 

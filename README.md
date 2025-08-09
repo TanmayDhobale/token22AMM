@@ -39,7 +39,7 @@ This project solves a critical gap in the Solana ecosystem: **no major AMMs curr
 ### Smart Contracts
 
 #### 1. Transfer Hook Program
-- **Program ID**: `GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U`
+- **Program ID**: `o1ZEvtrSXokknjnyaMkp7xyXfMJr4znptdpba7XKoiT`
 - **Purpose**: Executes custom logic during token transfers
 - **Key Functions**:
   - `initialize_extra_account_meta_list` - Sets up required accounts
@@ -47,7 +47,7 @@ This project solves a critical gap in the Solana ecosystem: **no major AMMs curr
   - `fallback` - Handles interface compatibility
 
 #### 2. AMM Program
-- **Program ID**: `BkcRnA4QMEiM4mPZK4rhpHofibY87yrwaQuSE2tcwScN`
+- **Program ID**: `6vL4UPFu43VpdcD8jBs8F4AvtaMtDxkEWMNpZJZtueYM`
 - **Purpose**: Manages liquidity pools and token swaps with transfer hook support
 - **Key Functions**:
   - `initialize_amm` - Creates AMM state with Token-2022 vaults
@@ -290,8 +290,8 @@ sideproject/
 ## 🚨 Important Notes
 
 ### Deployment Status
-- **Transfer Hook Program**: `GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U` (deployed to devnet)
-- **AMM Program**: `BkcRnA4QMEiM4mPZK4rhpHofibY87yrwaQuSE2tcwScN` (deployed with vaults, whitelist, hook enforcement)
+- **Transfer Hook Program**: `o1ZEvtrSXokknjnyaMkp7xyXfMJr4znptdpba7XKoiT` (deployed to devnet)
+- **AMM Program**: `6vL4UPFu43VpdcD8jBs8F4AvtaMtDxkEWMNpZJZtueYM` (deployed with vaults, whitelist, hook enforcement)
 - **Frontend**: Production-ready with comprehensive UI and one-click setup tools
 
 ### Known Limitations

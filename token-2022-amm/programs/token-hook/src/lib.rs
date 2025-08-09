@@ -4,11 +4,11 @@ use anchor_spl::{
     token_interface::{Mint, TokenAccount, TokenInterface},
 };
 use spl_tlv_account_resolution::{
-    account::ExtraAccountMeta, seeds::Seed, state::ExtraAccountMetaList,
+    state::ExtraAccountMetaList,
 };
 use spl_transfer_hook_interface::instruction::{ExecuteInstruction, TransferHookInstruction};
 
-declare_id!("GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U");
+declare_id!("o1ZEvtrSXokknjnyaMkp7xyXfMJr4znptdpba7XKoiT");
 
 #[program]
 pub mod token_hook {
@@ -59,8 +59,7 @@ pub mod token_hook {
     }
 
     /// Execute transfer hook - called by Token-2022 during transfers
-    #[interface(spl_transfer_hook_interface::execute)]
-    pub fn transfer_hook(ctx: Context<TransferHook>, amount: u64) -> Result<()> {
+    pub fn execute(ctx: Context<TransferHook>, amount: u64) -> Result<()> {
         msg!("Transfer hook executed!");
         msg!("  From: {}", ctx.accounts.source_token.key());
         msg!("  To: {}", ctx.accounts.destination_token.key());
@@ -87,7 +86,7 @@ pub mod token_hook {
                 let amount_bytes = amount.to_le_bytes();
 
                 // Invoke transfer hook instruction
-                __private::__global::transfer_hook(program_id, accounts, &amount_bytes)
+                __private::__global::execute(program_id, accounts, &amount_bytes)
             }
             _ => return Err(ProgramError::InvalidInstructionData.into()),
         }

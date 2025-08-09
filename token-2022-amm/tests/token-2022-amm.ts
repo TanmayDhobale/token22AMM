@@ -4,6 +4,7 @@ import { Token2022Amm } from "../target/types/token_2022_amm";
 import { TokenHook } from "../target/types/token_hook";
 import {
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   getAssociatedTokenAddress,
   createMint,
@@ -60,35 +61,35 @@ describe("Token-2022 AMM with Transfer Hooks", () => {
       tokenAMint.publicKey,
       user.publicKey,
       false,
-      TOKEN_PROGRAM_ID
+      TOKEN_2022_PROGRAM_ID
     );
 
     userTokenBAccount = await getAssociatedTokenAddress(
       tokenBMint.publicKey,
       user.publicKey,
       false,
-      TOKEN_PROGRAM_ID
+      TOKEN_2022_PROGRAM_ID
     );
 
     userLpAccount = await getAssociatedTokenAddress(
       lpMint.publicKey,
       user.publicKey,
       false,
-      TOKEN_PROGRAM_ID
+      TOKEN_2022_PROGRAM_ID
     );
 
     tokenAVault = await getAssociatedTokenAddress(
       tokenAMint.publicKey,
       ammPda,
       false,
-      TOKEN_PROGRAM_ID
+      TOKEN_2022_PROGRAM_ID
     );
 
     tokenBVault = await getAssociatedTokenAddress(
       tokenBMint.publicKey,
       ammPda,
       false,
-      TOKEN_PROGRAM_ID
+      TOKEN_2022_PROGRAM_ID
     );
 
     // Transfer hook account PDA
@@ -237,7 +238,7 @@ describe("Token-2022 AMM with Transfer Hooks", () => {
           lpMint: lpMint.publicKey,
           authority: user.publicKey,
           systemProgram: SystemProgram.programId,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           rent: SYSVAR_RENT_PUBKEY,
         })
@@ -264,7 +265,8 @@ describe("Token-2022 AMM with Transfer Hooks", () => {
           tokenBMint: tokenBMint.publicKey,
           tokenAVault: tokenAVault,
           tokenBVault: tokenBVault,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
         })
         .signers([user])
         .rpc();
@@ -303,7 +305,7 @@ describe("Token-2022 AMM with Transfer Hooks", () => {
           tokenOutVault: tokenBVault,
           extraAccountMetaList: null, // No transfer hook for this test
           extraAccountMetaListOut: null,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
           remainingAccounts: [],
           remainingAccountsOut: [],
         })
@@ -342,7 +344,7 @@ describe("Token-2022 AMM with Transfer Hooks", () => {
           tokenAVault: tokenAVault,
           tokenBVault: tokenBVault,
           lpMint: lpMint.publicKey,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
         })
         .signers([user])
         .rpc();

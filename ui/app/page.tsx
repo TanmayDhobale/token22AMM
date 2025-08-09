@@ -120,15 +120,12 @@ export default function Home() {
   });
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
 
-  // Replace with your deployed transfer hook program ID on devnet
-  const TRANSFER_HOOK_PROGRAM_ID = 'GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U';
-  // Replace with your deployed AMM program ID on devnet
-  // OLD: 'DCjgs2YXvEiZsiXVSMskg8ReMSsYbuLDpfMkXvP5iwsC' (has unsafe math - caused panics)
-  // FIXED: Improved AMM with safe math operations and correct declare_id!
-  const AMM_PROGRAM_ID = 'BkcRnA4QMEiM4mPZK4rhpHofibY87yrwaQuSE2tcwScN';
+  // Deployed program IDs on devnet
+  const TRANSFER_HOOK_PROGRAM_ID = 'o1ZEvtrSXokknjnyaMkp7xyXfMJr4znptdpba7XKoiT';
+  const AMM_PROGRAM_ID = '6vL4UPFu43VpdcD8jBs8F4AvtaMtDxkEWMNpZJZtueYM';
 
   const tabs = [
-    { id: 'overview', name: 'Overview', icon: '🏠' },
+    { id: 'overview', name: 'Overview', icon: '🏠' }, 
     { id: 'create-token', name: 'Create Token', icon: '🪙' },
     { id: 'create-pool', name: 'Create Pool', icon: '🏊' },
     { id: 'trade', name: 'Trade', icon: '📈' },
@@ -177,7 +174,7 @@ export default function Home() {
       const tokenBMintPubkey = new PublicKey(tokenB);
 
       const [ammPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
+        [Buffer.from('amm')],
         ammProgramId
       );
 
@@ -866,25 +863,11 @@ export default function Home() {
       const provider = (window as any).solana;
       const userPublicKey = new PublicKey(provider.publicKey.toString());
 
-      const tokenAMintPubkey = new PublicKey(tokenAMint);
-      const tokenBMintPubkey = new PublicKey(tokenBMint);
       const ammProgramId = new PublicKey(AMM_PROGRAM_ID);
 
-      // Derive AMM PDA and dependent PDAs
+      // Derive AMM PDA 
       const [ammPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
-        ammProgramId
-      );
-      const [tokenAVaultPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('token_a_vault'), ammPDA.toBuffer()],
-        ammProgramId
-      );
-      const [tokenBVaultPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('token_b_vault'), ammPDA.toBuffer()],
-        ammProgramId
-      );
-      const [lpMintPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('lp_mint'), ammPDA.toBuffer()],
+        [Buffer.from('amm')],
         ammProgramId
       );
 
@@ -916,17 +899,10 @@ export default function Home() {
 
       const initializeAmmInstruction = new anchor.web3.TransactionInstruction({
         keys: [
-          // Must match InitializeAmm<'info> order
+          // Must match simplified InitializeAmm<'info> order
           { pubkey: ammPDA, isSigner: false, isWritable: true },
-          { pubkey: tokenAMintPubkey, isSigner: false, isWritable: false },
-          { pubkey: tokenBMintPubkey, isSigner: false, isWritable: false },
-          { pubkey: tokenAVaultPDA, isSigner: false, isWritable: true },
-          { pubkey: tokenBVaultPDA, isSigner: false, isWritable: true },
-          { pubkey: lpMintPDA, isSigner: false, isWritable: true },
-          { pubkey: userPublicKey, isSigner: true, isWritable: true },
+          { pubkey: userPublicKey, isSigner: true, isWritable: true }, // authority
           { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-          { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
-          { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
         ],
         programId: ammProgramId,
         data: Buffer.from(instructionData),
@@ -938,8 +914,6 @@ export default function Home() {
 
       console.log('Initializing AMM with:', {
         ammPDA: ammPDA.toBase58(),
-        tokenAMint: tokenAMint,
-        tokenBMint: tokenBMint,
         discriminator: Array.from(discriminator),
       });
 
@@ -1019,7 +993,7 @@ export default function Home() {
 
       // Derive PDAs
       const [ammPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
+        [Buffer.from('amm')],
         ammProgramId
       );
 
@@ -1032,32 +1006,70 @@ export default function Home() {
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
 
+      // For CreatePool: Use the order as provided in the form (let program handle internal sorting)
       const [poolPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('pool'), ammPDA.toBuffer()],
+        [Buffer.from('pool'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
         ammProgramId
       );
-      const [tokenAVaultPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('token_a_vault'), ammPDA.toBuffer()],
-        ammProgramId
+      
+      // Calculate Associated Token Accounts for vaults
+      const tokenAVaultPDA = await getAssociatedTokenAddress(
+        tokenAMintPubkey,
+        ammPDA,
+        true, // allowOwnerOffCurve
+        TOKEN_2022_PROGRAM_ID
       );
-      const [tokenBVaultPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('token_b_vault'), ammPDA.toBuffer()],
-        ammProgramId
+      const tokenBVaultPDA = await getAssociatedTokenAddress(
+        tokenBMintPubkey,
+        ammPDA,
+        true, // allowOwnerOffCurve
+        TOKEN_2022_PROGRAM_ID
       );
+      
+      // Create LP mint PDA (this should be a mint account owned by AMM)
+      const lpMintKeypair = new Keypair();
+      const lpMintPubkey = lpMintKeypair.publicKey;
 
-      // Check if pool already exists
+
+      // Check if pool already exists - try both possible orderings
+      let poolExists = false;
+      let existingPoolPDA = null;
+      
+      // Try with current ordering
       try {
-        const poolAccount = await connection.getAccountInfo(poolPDA);
-        if (poolAccount) {
-          throw new Error(`Pool already exists for this token pair!\n\nToken A: ${effectiveTokenAMint}\nToken B: ${effectiveTokenBMint}\n\nYou can go to the "Trade" tab to use the existing pool for swapping.`);
+        const poolAccount1 = await connection.getAccountInfo(poolPDA);
+        if (poolAccount1) {
+          poolExists = true;
+          existingPoolPDA = poolPDA;
         }
-      } catch (poolCheckError: any) {
-        if (poolCheckError.message.includes('Pool already exists')) {
-          throw poolCheckError;
-        }
-        // If it's a different error, continue (pool probably doesn't exist)
-        console.log('Pool does not exist yet, proceeding with creation');
+      } catch (e) {
+        // Pool 1 doesn't exist
       }
+      
+      // If not found, try with reversed ordering (like in swap function)
+      if (!poolExists) {
+        const [poolPDA2] = PublicKey.findProgramAddressSync(
+          [Buffer.from('pool'), tokenBMintPubkey.toBuffer(), tokenAMintPubkey.toBuffer()],
+          ammProgramId
+        );
+        
+        try {
+          const poolAccount2 = await connection.getAccountInfo(poolPDA2);
+          if (poolAccount2) {
+            poolExists = true;
+            existingPoolPDA = poolPDA2;
+          }
+        } catch (e) {
+          // Pool 2 doesn't exist either
+        }
+      }
+      
+      if (poolExists) {
+        console.log('Found existing pool at PDA:', existingPoolPDA?.toString());
+        throw new Error(`Pool already exists for this token pair!\n\nToken A: ${effectiveTokenAMint}\nToken B: ${effectiveTokenBMint}\n\nPool PDA: ${existingPoolPDA?.toString()}\n\nYou can go to the "Trade" tab to use the existing pool for swapping.`);
+      }
+      
+      console.log('Pool does not exist yet, proceeding with creation');
 
       // Simplified version - just validate that mints exist
       const tokenAMintInfo = await connection.getAccountInfo(tokenAMintPubkey);
@@ -1084,6 +1096,59 @@ export default function Home() {
       if (!userTokenBInfo) {
         preIxs.push(createAssociatedTokenAccountInstruction(userPublicKey, userTokenB, userPublicKey, tokenBMintPubkey, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID));
       }
+
+      // Create vault ATAs and LP mint
+      const vaultAInfo = await connection.getAccountInfo(tokenAVaultPDA);
+      if (!vaultAInfo) {
+        preIxs.push(createAssociatedTokenAccountInstruction(userPublicKey, tokenAVaultPDA, ammPDA, tokenAMintPubkey, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID));
+      }
+      
+      const vaultBInfo = await connection.getAccountInfo(tokenBVaultPDA);
+      if (!vaultBInfo) {
+        preIxs.push(createAssociatedTokenAccountInstruction(userPublicKey, tokenBVaultPDA, ammPDA, tokenBMintPubkey, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID));
+      }
+
+      // Create LP mint
+      const lpMintInfo = await connection.getAccountInfo(lpMintPubkey);
+      if (!lpMintInfo) {
+        const createLpMintIx = SystemProgram.createAccount({
+          fromPubkey: userPublicKey,
+          newAccountPubkey: lpMintPubkey,
+          space: getMintLen([]),
+          lamports: await connection.getMinimumBalanceForRentExemption(getMintLen([])),
+          programId: TOKEN_2022_PROGRAM_ID,
+        });
+        const initLpMintIx = createInitializeMintInstruction(
+          lpMintPubkey,
+          6,
+          ammPDA,
+          null,
+          TOKEN_2022_PROGRAM_ID
+        );
+        preIxs.push(createLpMintIx, initLpMintIx);
+      }
+
+      // Set token pair configuration in AMM after creating vaults
+      const setTokenPairDiscriminator = new Uint8Array(await crypto.subtle.digest('SHA-256', 
+        new TextEncoder().encode('global:set_token_pair'))).slice(0, 8);
+      
+      const setTokenPairData = new Uint8Array(8 + 32 + 32 + 32 + 32 + 32); // discriminator + 5 pubkeys
+      setTokenPairData.set(setTokenPairDiscriminator, 0);
+      setTokenPairData.set(tokenAMintPubkey.toBytes(), 8);
+      setTokenPairData.set(tokenBMintPubkey.toBytes(), 40);
+      setTokenPairData.set(tokenAVaultPDA.toBytes(), 72);
+      setTokenPairData.set(tokenBVaultPDA.toBytes(), 104);
+      setTokenPairData.set(lpMintPubkey.toBytes(), 136);
+
+      const setTokenPairIx = new anchor.web3.TransactionInstruction({
+        keys: [
+          { pubkey: ammPDA, isSigner: false, isWritable: true },  // amm
+          { pubkey: userPublicKey, isSigner: true, isWritable: false }, // user (no longer authority)
+        ],
+        programId: ammProgramId,
+        data: Buffer.from(setTokenPairData),
+      });
+      preIxs.push(setTokenPairIx);
 
       // Create pool instruction data (browser-compatible)
       // Calculate the correct discriminator for create_pool
@@ -1117,20 +1182,34 @@ export default function Home() {
       instructionData.set(tokenABytes, 8);
       instructionData.set(tokenBBytes, 16);
 
+      // Calculate extra account metas PDAs for transfer hooks
+      const transferHookProgramId = new PublicKey('o1ZEvtrSXokknjnyaMkp7xyXfMJr4znptdpba7XKoiT');
+      const [tokenAExtraMetas] = PublicKey.findProgramAddressSync(
+        [Buffer.from('extra-account-metas'), tokenAMintPubkey.toBuffer()],
+        transferHookProgramId
+      );
+      const [tokenBExtraMetas] = PublicKey.findProgramAddressSync(
+        [Buffer.from('extra-account-metas'), tokenBMintPubkey.toBuffer()],
+        transferHookProgramId
+      );
+
       const createPoolInstruction = new anchor.web3.TransactionInstruction({
         keys: [
           // Must match CreatePool<'info> order
-          { pubkey: poolPDA, isSigner: false, isWritable: true },
-          { pubkey: ammPDA, isSigner: false, isWritable: false },
-          { pubkey: userPublicKey, isSigner: true, isWritable: true },
-          { pubkey: userTokenA, isSigner: false, isWritable: true },
-          { pubkey: userTokenB, isSigner: false, isWritable: true },
-          { pubkey: tokenAMintPubkey, isSigner: false, isWritable: false },
-          { pubkey: tokenBMintPubkey, isSigner: false, isWritable: false },
-          { pubkey: tokenAVaultPDA, isSigner: false, isWritable: true },
-          { pubkey: tokenBVaultPDA, isSigner: false, isWritable: true },
-          { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },
-          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+          { pubkey: poolPDA, isSigner: false, isWritable: true },              // pool
+          { pubkey: ammPDA, isSigner: false, isWritable: false },              // amm  
+          { pubkey: userPublicKey, isSigner: true, isWritable: true },         // user
+          { pubkey: userTokenA, isSigner: false, isWritable: true },           // user_token_a
+          { pubkey: userTokenB, isSigner: false, isWritable: true },           // user_token_b
+          { pubkey: tokenAMintPubkey, isSigner: false, isWritable: false },    // token_a_mint
+          { pubkey: tokenBMintPubkey, isSigner: false, isWritable: false },    // token_b_mint
+          { pubkey: tokenAVaultPDA, isSigner: false, isWritable: true },       // token_a_vault
+          { pubkey: tokenBVaultPDA, isSigner: false, isWritable: true },       // token_b_vault
+          { pubkey: tokenAExtraMetas, isSigner: false, isWritable: false },    // token_a_extra_metas
+          { pubkey: tokenBExtraMetas, isSigner: false, isWritable: false },    // token_b_extra_metas
+          { pubkey: transferHookProgramId, isSigner: false, isWritable: false }, // transfer_hook_program
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
+          { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false },   // token_program
         ],
         programId: ammProgramId,
         data: Buffer.from(instructionData),
@@ -1151,6 +1230,9 @@ export default function Home() {
         tokenBAmountBigInt: tokenBAmountBigInt.toString(),
         poolPDA: poolPDA.toBase58(),
         ammPDA: ammPDA.toBase58(),
+        tokenAExtraMetas: tokenAExtraMetas.toBase58(),
+        tokenBExtraMetas: tokenBExtraMetas.toBase58(),
+        transferHookProgram: transferHookProgramId.toBase58(),
         discriminator: Array.from(discriminator),
         instructionData: Array.from(instructionData),
         ammProgramId: ammProgramId.toBase58(),
@@ -1158,6 +1240,8 @@ export default function Home() {
       
       // Sign and send transaction
       if (provider.signTransaction) {
+        // First, partial sign with LP mint keypair
+        transaction.partialSign(lpMintKeypair);
         const signedTx = await provider.signTransaction(transaction);
         const rawTransaction = signedTx.serialize();
         
@@ -1252,14 +1336,52 @@ export default function Home() {
 
       // Derive PDAs
       const [ammPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
+        [Buffer.from('amm')],
         ammProgramId
       );
 
-      const [poolPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('pool'), ammPDA.toBuffer()],
+      // For Swap: Try both possible token orderings to find the existing pool
+      let poolPDA;
+      let foundPool = false;
+      
+      // Try with tokenA, tokenB order first
+      const [poolPDA1] = PublicKey.findProgramAddressSync(
+        [Buffer.from('pool'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
         ammProgramId
       );
+      
+      // Try with tokenB, tokenA order
+      const [poolPDA2] = PublicKey.findProgramAddressSync(
+        [Buffer.from('pool'), tokenBMintPubkey.toBuffer(), tokenAMintPubkey.toBuffer()],
+        ammProgramId
+      );
+      
+      // Check which pool exists
+      try {
+        const poolAccount1 = await connection.getAccountInfo(poolPDA1);
+        if (poolAccount1) {
+          poolPDA = poolPDA1;
+          foundPool = true;
+        }
+      } catch (e) {
+        // Pool 1 doesn't exist, try pool 2
+      }
+      
+      if (!foundPool) {
+        try {
+          const poolAccount2 = await connection.getAccountInfo(poolPDA2);
+          if (poolAccount2) {
+            poolPDA = poolPDA2;
+            foundPool = true;
+          }
+        } catch (e) {
+          // Neither pool exists
+        }
+      }
+      
+      if (!foundPool) {
+        poolPDA = poolPDA1; // Default to first ordering for error message
+      }
 
       // Derive whitelist PDA for this AMM
       const [whitelistPDA] = PublicKey.findProgramAddressSync(
@@ -1286,8 +1408,9 @@ export default function Home() {
         
         // Parse pool data to check if it has liquidity
         if (poolAccount.data.length >= 24) { // Assuming u64 + u64 + u64 = 24 bytes minimum
-          const tokenAAmount = new DataView(poolAccount.data.buffer).getBigUint64(8, true); // Skip discriminator
-          const tokenBAmount = new DataView(poolAccount.data.buffer).getBigUint64(16, true);
+          // Pool struct: discriminator(8) + token_a_mint(32) + token_b_mint(32) + token_a_amount(8) + token_b_amount(8) + lp_supply(8) + bump(1)
+          const tokenAAmount = new DataView(poolAccount.data.buffer).getBigUint64(72, true); // After discriminator + 2 pubkeys
+          const tokenBAmount = new DataView(poolAccount.data.buffer).getBigUint64(80, true); // After discriminator + 2 pubkeys + 1 u64
           
           console.log('Raw pool data inspection:', {
             dataLength: poolAccount.data.length,
@@ -1344,18 +1467,41 @@ export default function Home() {
       instructionData.set(amountInBytes, 8);
       instructionData.set(minAmountOutBytes, 16);
 
+      // Calculate user token accounts (ATAs)
+      const userTokenIn = await getAssociatedTokenAddress(tokenAMintPubkey, userPublicKey, false, TOKEN_2022_PROGRAM_ID);
+      const userTokenOut = await getAssociatedTokenAddress(tokenBMintPubkey, userPublicKey, false, TOKEN_2022_PROGRAM_ID);
+      
+      // Calculate vault accounts (ATAs owned by AMM)
+      const tokenInVault = await getAssociatedTokenAddress(tokenAMintPubkey, ammPDA, true, TOKEN_2022_PROGRAM_ID);
+      const tokenOutVault = await getAssociatedTokenAddress(tokenBMintPubkey, ammPDA, true, TOKEN_2022_PROGRAM_ID);
+
+      // Calculate extra account metas PDAs for transfer hooks
+      const transferHookProgramId = new PublicKey('o1ZEvtrSXokknjnyaMkp7xyXfMJr4znptdpba7XKoiT');
+      const [tokenInExtraMetas] = PublicKey.findProgramAddressSync(
+        [Buffer.from('extra-account-metas'), tokenAMintPubkey.toBuffer()],
+        transferHookProgramId
+      );
+      const [tokenOutExtraMetas] = PublicKey.findProgramAddressSync(
+        [Buffer.from('extra-account-metas'), tokenBMintPubkey.toBuffer()],
+        transferHookProgramId
+      );
+
       const swapInstruction = new anchor.web3.TransactionInstruction({
         keys: [
-          { pubkey: poolPDA, isSigner: false, isWritable: true },
-          { pubkey: ammPDA, isSigner: false, isWritable: false },
-          { pubkey: userPublicKey, isSigner: true, isWritable: true },
-          { pubkey: tokenAMintPubkey, isSigner: false, isWritable: false },
-          { pubkey: tokenBMintPubkey, isSigner: false, isWritable: false },
-          // whitelist account (read-only)
-          { pubkey: whitelistPDA, isSigner: false, isWritable: false },
-          // remaining accounts for transfer hook (EAML PDAs)
-          { pubkey: extraMetaListInPDA, isSigner: false, isWritable: false },
-          { pubkey: extraMetaListOutPDA, isSigner: false, isWritable: false },
+          // Must match Swap<'info> struct order
+          { pubkey: poolPDA, isSigner: false, isWritable: true },              // pool
+          { pubkey: ammPDA, isSigner: false, isWritable: false },              // amm
+          { pubkey: userPublicKey, isSigner: true, isWritable: true },         // user
+          { pubkey: userTokenIn, isSigner: false, isWritable: true },          // user_token_in
+          { pubkey: userTokenOut, isSigner: false, isWritable: true },         // user_token_out
+          { pubkey: tokenAMintPubkey, isSigner: false, isWritable: false },    // token_in_mint
+          { pubkey: tokenBMintPubkey, isSigner: false, isWritable: false },    // token_out_mint
+          { pubkey: tokenInVault, isSigner: false, isWritable: true },         // token_in_vault
+          { pubkey: tokenOutVault, isSigner: false, isWritable: true },        // token_out_vault
+          { pubkey: tokenInExtraMetas, isSigner: false, isWritable: false },   // token_in_extra_metas
+          { pubkey: tokenOutExtraMetas, isSigner: false, isWritable: false },  // token_out_extra_metas
+          { pubkey: transferHookProgramId, isSigner: false, isWritable: false }, // transfer_hook_program
+          { pubkey: TOKEN_2022_PROGRAM_ID, isSigner: false, isWritable: false }, // token_program
         ],
         programId: ammProgramId,
         data: Buffer.from(instructionData),
@@ -1437,7 +1583,7 @@ export default function Home() {
       const tokenAMintPubkey = new PublicKey(fromToken);
       const tokenBMintPubkey = new PublicKey(toToken);
       const [ammPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
+        [Buffer.from('amm')],
         ammProgramId
       );
       const [whitelistPDA] = PublicKey.findProgramAddressSync(
@@ -1488,7 +1634,7 @@ export default function Home() {
       const tokenAMintPubkey = new PublicKey(fromToken);
       const tokenBMintPubkey = new PublicKey(toToken);
       const [ammPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
+        [Buffer.from('amm')],
         ammProgramId
       );
       const [whitelistPDA] = PublicKey.findProgramAddressSync(
@@ -1540,7 +1686,7 @@ export default function Home() {
       const tokenAMintPubkey = new PublicKey(fromToken);
       const tokenBMintPubkey = new PublicKey(toToken);
       const [ammPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from('amm'), tokenAMintPubkey.toBuffer(), tokenBMintPubkey.toBuffer()],
+        [Buffer.from('amm')],
         ammProgramId
       );
       const [whitelistPDA] = PublicKey.findProgramAddressSync(

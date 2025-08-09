@@ -1,21 +1,22 @@
 [toolchain]
 package_manager = "yarn"
+anchor_version = "0.30.1"
 
 [features]
 resolution = true
 skip-lint = false
 
 [programs.localnet]
-token_2022_amm = "BUSnE2ekGTqthHsRd2X1HdkWKa4o4AkzjwhD2yDToUXs"
-token_hook = "GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U"
+token_2022_amm = "6vL4UPFu43VpdcD8jBs8F4AvtaMtDxkEWMNpZJZtueYM"
+token_hook = "o1ZEvtrSXokknjnyaMkp7xyXfMJr4znptdpba7XKoiT"
 
 [programs.devnet]
-token_2022_amm = "BUSnE2ekGTqthHsRd2X1HdkWKa4o4AkzjwhD2yDToUXs"
-token_hook = "GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U"
+token_2022_amm = "6vL4UPFu43VpdcD8jBs8F4AvtaMtDxkEWMNpZJZtueYM"
+token_hook = "o1ZEvtrSXokknjnyaMkp7xyXfMJr4znptdpba7XKoiT"
 
 [programs.mainnet]
-token_2022_amm = "BUSnE2ekGTqthHsRd2X1HdkWKa4o4AkzjwhD2yDToUXs"
-token_hook = "GfXgLTyDbBP3LJL5XZtnBPgQm1NuQ7xNCf4wNLYHSt1U"
+token_2022_amm = "6vL4UPFu43VpdcD8jBs8F4AvtaMtDxkEWMNpZJZtueYM"
+token_hook = "o1ZEvtrSXokknjnyaMkp7xyXfMJr4znptdpba7XKoiT"
 
 [registry]
 url = "https://api.apr.dev"

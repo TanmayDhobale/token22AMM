@@ -1,0 +1,75 @@
+# 🔐 Solana & Anchor Security Files
+# CRITICAL: Never commit private keys or program keypairs
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!Anchor.toml
+*-keypair.json
+program-keypair*.json
+id.json
+keypair.json
+
+# 🛠️ Build Artifacts & Dependencies
+target/
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# 📁 Rust Build Files
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# 🗃️ IDL & Program Files (optional - you might want to commit these)
+*.so
+idl/
+types/
+
+# 📝 Environment & Config
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.log
+
+# 💻 OS & Editor Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+
+# 🎯 Solana CLI Config
+~/.config/solana/
+
+# 📦 Package Manager
+yarn-error.log
+npm-debug.log*
+yarn-debug.log*
+lerna-debug.log*
+
+# 🔧 Next.js
+.next/
+next-env.d.ts
+
+# 🧪 Testing
+.nyc_output
+coverage/
+
+# 📊 Temporary Files
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# 🚀 Deployment
+.vercel
+.netlify
